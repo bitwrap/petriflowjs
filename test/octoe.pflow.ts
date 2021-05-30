@@ -1,4 +1,4 @@
-import {MetaModel, ModelDsl} from "../src/metamodel";
+import {ModelDsl} from "../src/metamodel";
 
 export enum Player {
     X = "x",

@@ -3,30 +3,27 @@ enum NodeType {
     Transition=1,
 }
 
-// DSL interface
-export interface ModelDsl {
-    role: (label: string) => Role;
-    cell: (label: string, initial?: number, capacity?: number) => Node;
-    fn: (label: string, role: Role) => Node;
-}
+const ErrorBadInhibitorSource: Error = new Error("inhibitor source must be a place");
+const ErrorBadInhibitorTarget: Error = new Error("inhibitor target must be a transitions");
+const ErrorBadArcWeight: Error = new Error("arc weight must be positive int");
+const ErrorBadArcTransition: Error = new Error("source and target are both transitions");
+const ErrorBadArcPlace: Error = new Error("source and target are both places");
+const ErrorFrozenModel: Error = new Error("model cannot be updated after it is frozen");
 
-// Domain Specific Language (DSL) model definition errors
-export const ErrorBadInhibitorSource: Error = new Error("inhibitor source must be a place");
-export const ErrorBadInhibitorTarget: Error = new Error("inhibitor target must be a transitions");
-export const ErrorBadArcWeight: Error = new Error("arc weight must be positive int");
-export const ErrorBadArcTransition: Error = new Error("source and target are both transitions");
-export const ErrorBadArcPlace: Error = new Error("source and target are both places");
-export const ErrorFrozenModel: Error = new Error("model cannot be updated after it is frozen");
-
-
-export type Place = {
+/**
+ * Places contain tokens
+ */
+ type Place = {
     label: string;
     offset: number;
     initial?: number;
     capacity?: number;
 }
 
-export type Transition = {
+/**
+ * Transitions move tokens between Places
+ */
+ type Transition = {
     label: string;
     role: Role;
     offset: number;
@@ -34,24 +31,44 @@ export type Transition = {
     guards?: Map<string, Guard>;
 }
 
-export type Role = {
+/**
+ * Roles provide a basis of an Access Control
+ * Role assertions helps bind program behavior to a model
+ */
+ type Role = {
     label: string;
 }
 
-export type Arc = {
+/**
+ * Arcs define the bridges between Places
+ */
+ type Arc = {
     source: Node;
     target: Node;
     weight: number;
     inhibitor?: boolean;
 }
 
-export type Guard = {
+/**
+ * A Guard is a conditional rule than inhibits a Transition.
+ *
+ * Given: Inhibitor Arc (Guard) = g1
+ * defined as a relation: p1(g1) -> t1(w1)
+ *
+ * A Guard rule can be stated as:
+ * If Place p1 has more than weight <w1> tokens, inhibit the transformation t1.
+ *
+ */
+ type Guard = {
     label: string;
     delta: Array<number>;
 }
 
+/**
+ * Nodes serve as syntactic sugar to bridge elements of the DSL
+ */
 class Node {
-    private metaModel: MetaModel // parent relation
+    metaModel: MetaModel // parent relation
     public label: string
     public nodeType: NodeType
     public place?: Place
@@ -71,6 +88,11 @@ class Node {
         return this.nodeType == NodeType.Transition;
     }
 
+    /**
+     * create a guard definition
+     * @param weight - conditional check, a transaction is fire-able if a place's token state is below this threshold.
+     * @param target - Transition node to target for this rule.
+     */
     guard(weight: number, target: Node) {
         if (!this.isPlace()) {
             throw ErrorBadInhibitorSource;
@@ -78,17 +100,20 @@ class Node {
         if (!target.isTransition()) {
             throw ErrorBadInhibitorTarget;
         }
-        /* FIXME
-        this.metaModel.({
+        this.metaModel.arcs.push({
             source: this,
             target: target,
             weight: weight,
             inhibitor: true,
-            label: lable
-         */
+        });
         return this;
     }
 
+    /**
+     * Define an Arc to transmit between two Nodes
+     * @param weight - tokens required to activate transition
+     * @param target - target node to receive transmitted tokens
+     */
     tx(weight: number, target: Node) {
         if (weight <= 0) {
             throw ErrorBadArcWeight;
@@ -108,7 +133,10 @@ class Node {
     }
 }
 
-export class Net {
+/**
+ * Indexed Petri-Net data structure
+ */
+ class Net {
     places: Map<string, Place>;
     transitions: Map<string, Transition>;
 
@@ -117,10 +145,17 @@ export class Net {
         this.transitions = new Map<string, Transition>();
     }
 
+    /**
+     * Builds a properly sized [0]*n vector for this model.
+     */
     emptyVector(): Array<number> {
         return new Array<number>(this.places.size).fill(0);
     }
 
+    /**
+     * Collect initial place conditions into a vector.
+     * Used to initialize state machine when transacting with a Model.
+     */
     initialState(): Array<number> {
         const out: Array<number> = [];
         // can this use map?
@@ -130,6 +165,9 @@ export class Net {
         return out;
     }
 
+    /**
+     * Collect capacity limits into a vector
+     */
     stateCapacity(): Array<number> {
         const out: Array<number> = [];
         this.places.forEach((pl: Place) => {
@@ -139,8 +177,12 @@ export class Net {
     }
 }
 
-export class MetaModel extends Net {
-    frozen: boolean // indicate model is finalized
+/**
+ * MetaModel - converts DSL structures into a vector addition system.
+ * https://en.wikipedia.org/wiki/Vector_addition_system
+ */
+ class MetaModel extends Net {
+    private frozen: boolean // indicate model is finalized
     roles: Map<string, Role>;
     arcs: Array<Arc>
 
@@ -149,13 +191,17 @@ export class MetaModel extends Net {
         this.frozen = false;
         this.arcs = new Array<Arc>();
         this.roles = new Map<string, Role>();
-        };
+    };
 
-    assertNotFrozen(): void {
+    private assertNotFrozen(): void {
         if (this.frozen) { throw ErrorFrozenModel; }
     }
 
-    reindex(): void {
+    /**
+     * Traverse the syntax tree of the DSL
+     * Operations are validated, indexed and vectorized
+     */
+    protected reindex(): void {
         this.frozen = true;
         this.transitions.forEach((txn: Transition) => {
             txn.delta = this.emptyVector(); // right-size all vectors
@@ -182,6 +228,10 @@ export class MetaModel extends Net {
         });
     }
 
+    /**
+     * Roles are used to map access control rules onto the Petri-Net model.
+     * @param def - unique name for this role
+     */
     role(def: string): Role {
         this.assertNotFrozen();
         const r: Role = {label: def};
@@ -189,6 +239,15 @@ export class MetaModel extends Net {
         return r;
     }
 
+    /**
+     * Cells - containers that hold tokens.
+     *
+     * In PetriNet terms a Cell is identical to a Place.
+     * Used as either the target or source of a transition declaration.
+     * @param label - name of the cell
+     * @param initial - initial token value
+     * @param capacity - max token capacity
+     */
     cell(label: string, initial?: number, capacity?: number): Node {
         this.assertNotFrozen();
         const offset = this.places.size;
@@ -198,6 +257,13 @@ export class MetaModel extends Net {
         return n;
     }
 
+    /**
+     * fn - 'Partial Functions' declaration
+     *
+     * Used as either the target or source of a transition declaration.
+     * @param label - name of this transition
+     * @param role - pre-defined role required to execute function
+     */
     fn(label: string, role: Role): Node {
         this.assertNotFrozen();
         const guards = new Map<string,Guard>();
@@ -210,4 +276,142 @@ export class MetaModel extends Net {
     }
 }
 
+export interface ModelDsl {
+    role: (label: string) => Role;
+    cell: (label: string, initial?: number, capacity?: number) => Node;
+    fn: (label: string, role: Role) => Node;
+}
+
+type ModelDeclaration = (modelDef: ModelDsl) => void
+
+export const ErrorInvalidPlace: Error = new Error("invalid place");
+export const ErrorInvalidAction: Error = new Error("invalid action");
+export const ErrorInvalidOutput: Error = new Error("output cannot be negative");
+export const ErrorExceedsCapacity: Error = new Error("output exceeds capacity");
+export const ErrorGuardCheckFailure: Error = new Error("guard condition failure");
+
+class StateMachine extends MetaModel {
+    schema: string;
+
+    constructor(schema: string, declaration: ModelDeclaration) {
+        super();
+        this.schema = schema;
+        declaration({
+            role: this.role.bind(this),
+            cell: this.cell.bind(this),
+            fn: this.fn.bind(this),
+        });
+        this.reindex();
+    }
+
+    /**
+     * Perform vector addition, asserting that bounds are not exceeded
+     * @param state
+     * @param delta
+     * @param multiplier
+     * @param capacity
+     * @private
+     */
+    private add(state: Array<number>, delta: Array<number>, multiplier: number, capacity: Array<number>): [Error, Array<number>] {
+        let err = null;
+        const out = this.emptyVector();
+        state.forEach((value, index) => {
+            const sum = value + delta[index] * multiplier;
+            if (sum < 0) {
+                err = ErrorInvalidOutput;
+            }
+            if ((capacity && (capacity[index] > 0 && sum > capacity[index]))) {
+                err = ErrorExceedsCapacity;
+            }
+            out[index] = sum;
+        });
+        return [err, out];
+    }
+
+    /**
+     * List available actions
+     */
+    actions(): IterableIterator<string> {
+        return this.transitions.keys();
+    }
+
+    /**
+     * Return defined transition by label
+     * @param transitionLabel
+     */
+    action(transitionLabel: string): [Array<number>, Role, Map<string, Guard>] {
+        try{
+            const tx = this.transitions.get(transitionLabel);
+            return [tx.delta, tx.role, tx.guards];
+        } catch {
+            throw ErrorInvalidAction;
+        }
+    }
+
+    /**
+     * Perform state transformation returning an error if it is invalid
+     * @param inputState - starting state vector
+     * @param transaction - label of transaction to apply
+     * @param multiplier - number of iterations to apply
+     */
+    transform(inputState: Array<number>, transaction: string, multiplier: number): [Error, Array<number>, Role] {
+        const [delta, role, guards] = this.action(transaction);
+        for( const [, guard] of guards) {
+            const [check, out] = this.add(inputState, guard.delta, multiplier, this.emptyVector());
+            if (check == null) {
+                return [ErrorGuardCheckFailure, out, role];
+            }
+        }
+        const [err, out] = this.add(inputState, delta, multiplier, this.stateCapacity());
+        return [err, out, role];
+    }
+
+    /**
+     * Get offset of place by label
+     * @param placeLabel
+     */
+    offset(placeLabel: string): number {
+        const pl = this.places.get(placeLabel);
+        if (! pl) {
+            throw ErrorInvalidPlace;
+        }
+        return pl.offset;
+    }
+
+    /**
+     * Get offset of place by label
+     * @param transitionLabel
+     */
+    actionId(transitionLabel: string): number {
+        const act = this.transitions.get(transitionLabel);
+        if (! act) {
+            throw ErrorInvalidAction;
+        }
+        return act.offset;
+    }
+
+}
+
+export interface Model {
+    schema: string;
+    places: Map<string, Place>;
+    transitions: Map<string, Transition>;
+    emptyVector(): Array<number>;
+    initialState(): Array<number>;
+    stateCapacity(): Array<number>;
+    transform(inputState: Array<number>, transaction: string, multiplier: number): [Error, Array<number>, Role];
+    actions(): IterableIterator<string>;
+    action(transitionLabel: string): [Array<number>, Role, Map<string, Guard>];
+    actionId(transitionLabel: string): number;
+    offset(placeLabel: string): number;
+}
+
+/**
+ * Load Petri-net declaration as an executable model.
+ * @param schema - name of this model
+ * @param declaration - callback to invoke DSL code declarations
+ */
+export function NewModel(schema: string, declaration: ModelDeclaration): Model {
+    return new StateMachine(schema, declaration);
+}
 

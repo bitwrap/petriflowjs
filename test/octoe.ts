@@ -1,6 +1,5 @@
-import {Move, Player, Turn, v1 as octoeV1} from "./octoe.pflow";
-import {Model} from "../src";
-import {StateMachine} from "../src/statemachine";
+import {Move, Player, Turn, v1} from "./octoe.pflow";
+import {Model, NewModel} from "../src/metamodel";
 
 /**
  * game.ledger record type
@@ -25,10 +24,10 @@ function contains(setA: Set<string>, setB: Set<string>): boolean {
 }
 
 /**
- * Play a game of tic-tac-toe using the petri-net model
+ * Play a game of tic-tac-toe using a Petri-net model
  */
-export class Octoe extends StateMachine {
-    model: Model
+export class Octoe {
+    model: Model = NewModel("octoe", v1);
     state: Array<number>
     ledger: Array<Event>
 
@@ -41,10 +40,6 @@ export class Octoe extends StateMachine {
     ]
 
     constructor(state?: Array<number>) {
-        super();
-        this.model = new Model("octoe", octoeV1);
-        this.places = this.model.places;
-        this.transitions = this.model.transitions;
         this.ledger = new Array<Event>();
         if (state) {
             this.state = state;
@@ -57,26 +52,28 @@ export class Octoe extends StateMachine {
      * Check for O turn
      */
     isTurnO (): boolean {
-        return this.state[this.offset(Turn.O)] == 1;
+        return this.state[this.model.offset(Turn.O)] == 1;
     }
 
     /**
      * Check for X turn
      */
     isTurnX (): boolean {
-        return this.state[this.offset(Turn.X)] == 1;
+        return this.state[this.model.offset(Turn.X)] == 1;
     }
 
     /**
-     * Perform state transformation and
-     * store record player role and move location in ledger
+     * move - performs a state transformation and keep a record.
+     *
+     * A given model's labels can be thought of as an internal DSL specific to this program.
      * @param action
      */
     move(action: string): [Error, Array<number>, string] {
-        const [err, out, role] = this.transform(this.state, action, 1);
+        const [err, out, role] = this.model.transform(this.state, action, 1);
         if (!err) {
             this.state = out;
-            this.ledger.push({ role: role.label, moved: action.substr(1) });
+            const moved = action.substr(1);
+            this.ledger.push({ role: role.label, moved });
         }
         return [err, out, role.label];
     }
@@ -87,8 +84,8 @@ export class Octoe extends StateMachine {
      */
     availableMoves(role: string): Array<string> {
         const moves = new Array<string>();
-        for (const action of this.actions()) {
-            const [err, out, requireRole] = this.transform(this.state, action, 1);
+        for (const action of this.model.actions()) {
+            const [err, out, requireRole] = this.model.transform(this.state, action, 1);
             if (out && !err && role == requireRole.label) {
                 moves.push(action);
             }
@@ -117,6 +114,8 @@ export class Octoe extends StateMachine {
         });
 
         for (const winSet of this.winningMoves) {
+            // REVIEW: could enhance here to only check for one player
+            // based on whose move it is
             if (contains(setX, winSet)) {
                 return [true, Player.X];
             }
@@ -128,9 +127,6 @@ export class Octoe extends StateMachine {
         return [false, null];
     }
 
-    /**
-     * Test if game is over
-     */
     isOver(): boolean {
         return this.hasWinner()[0] ||
             this.availableMoves(Player.X).length == 0 &&

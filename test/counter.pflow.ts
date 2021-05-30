@@ -1,7 +1,7 @@
 import {ModelDsl} from "../src/metamodel";
 
 export function v1(dsl: ModelDsl) {
-    const { role, cell, fn} = dsl;
+    const {role, cell, fn} = dsl;
 
     const user = role("default");
 
@@ -13,4 +13,10 @@ export function v1(dsl: ModelDsl) {
 
     fn("inc0", user).tx(1, p00);
     fn("inc1", user).tx(1, p01);
+
+    // add a conditional to decrement p0
+    const flag = cell("flag",1,1);
+    const clear = fn("clearFlag", role("admin"));
+    flag.tx(1, clear);
+    flag.guard(1, dec0);
 }

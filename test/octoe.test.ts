@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { Octoe} from "./octoe";
-import {ErrorInvalidOutput} from "../src/statemachine";
+import {ErrorInvalidOutput} from "../src/metamodel";
 import {Move, Player} from "./octoe.pflow";
 
 describe("Octoe", () => {
@@ -58,8 +58,8 @@ describe("Octoe", () => {
 
     it("should allow user to provide input state", () => {
         const g = new Octoe();
-        const inState = g.initialState();
-        inState[g.offset("11")] = 0; // remove middle space
+        const inState = g.model.initialState();
+        inState[g.model.offset("11")] = 0; // remove middle space
         const game = new Octoe(inState);
         expect(game.availableMoves(Player.X)).to.include("x00");
         expect(game.availableMoves(Player.X)).to.not.include("x11");
@@ -67,9 +67,9 @@ describe("Octoe", () => {
 
     it("should allow lookup action offset", () => {
         const g = new Octoe();
-        expect(g.actionId("x00")).eqls(0);
-        expect(g.actionId("x11")).eqls(4);
-        expect(g.actionId("o22")).eqls(17);
+        expect(g.model.actionId("x00")).eqls(0);
+        expect(g.model.actionId("x11")).eqls(4);
+        expect(g.model.actionId("o22")).eqls(17);
     });
 
 });
